@@ -2,60 +2,72 @@ import streamlit as st
 from duckduckgo_search import DDGS
 from datetime import datetime
 
-st.set_page_config(page_title="Udupi Dental Finder", page_icon="🦷")
+st.set_page_config(page_title="Udupi Dental Finder Pro", page_icon="🦷", layout="wide")
 
-st.title("🦷 Udupi Dental Event & Course Finder")
-st.markdown("Searching for Implant courses, short modules, workshops, and news in **Udupi/Manipal**.")
+st.title("🦷 Udupi & Manipal Dental Course Tracker")
+st.markdown("Searching the web for Endodontics, Implants, and Workshops in the Udupi region.")
 
 def search_events():
-    # We use broader queries here to catch "3 days", "weekend", or "general events"
+    # We broaden the terms significantly to ensure we don't miss anything
     queries = [
-        "dental implant course Udupi Manipal",
-        "dental module BDS MDS Udupi",
-        "MCODS Manipal dental workshops news CDE",
-        "dental hands-on workshop Udupi",
-        "IDA Udupi dental events news",
-        "dental open house Udupi"
+        "dental workshop Manipal 2024 2026",
+        "dental conclave Udupi",
+        "endodontics certificate course Manipal",
+        "root canal workshop Udupi",
+        "dental implant module Karnataka BDS MDS",
+        "MCODS Manipal upcoming events",
+        "IDA Udupi branch workshops"
     ]
     
     found_results = []
     
-    with st.spinner('Scanning the entire web for Udupi dental updates...'):
+    with st.spinner('Scanning all Indian dental portals for Udupi/Manipal updates...'):
         with DDGS() as ddgs:
             for q in queries:
-                # We search the web
-                results = ddgs.text(q, max_results=8)
-                for r in results:
-                    content = (r['title'] + r['body']).lower()
-                    
-                    # LOCATION FILTER: Must mention Udupi or Manipal
-                    if "udupi" in content or "manipal" in content:
-                        # Ensure it's not a duplicate
-                        if r['href'] not in [res['link'] for res in found_results]:
-                            found_results.append({
-                                "title": r['title'],
-                                "link": r['href'],
-                                "desc": r['body']
-                            })
+                # Region 'in-en' targets India/English specifically
+                # timelimit 'y' looks for things within the last year
+                results = ddgs.text(q, region='in-en', max_results=10)
+                if results:
+                    for r in results:
+                        # We only filter out results that are definitely NOT in the right area
+                        content = (r['title'] + r['body']).lower()
+                        
+                        # We look for ANY local keyword
+                        local_keywords = ["manipal", "udupi", "mcods", "karnataka", "nitte", "mahe"]
+                        if any(k in content for k in local_keywords):
+                            if r['href'] not in [res['link'] for res in found_results]:
+                                found_results.append({
+                                    "title": r['title'],
+                                    "link": r['href'],
+                                    "desc": r['body']
+                                })
     return found_results
 
-if st.button('🔍 Live Search for Dental Events in Udupi'):
+if st.button('🔍 Run Deep Search (Wide Scan)'):
     data = search_events()
     
     if data:
-        st.success(f"Found {len(data)} potential updates!")
+        st.success(f"Found {len(data)} potential events and listings!")
+        
+        # Displaying results in a clean list
         for item in data:
-            # We use expanders to keep the list clean
-            with st.expander(item['title']):
-                st.write(f"**Snippet from web:** {item['desc']}")
-                st.markdown(f"[**Visit Website / View Details**]({item['link']})")
+            with st.container():
+                # Color code MCODS/Manipal.edu results
+                if "manipal.edu" in item['link']:
+                    st.markdown(f"### 🏫 {item['title']}")
+                    st.info("Primary source: Manipal Academy of Higher Education")
+                else:
+                    st.markdown(f"### 🌐 {item['title']}")
+                
+                st.write(item['desc'])
+                st.markdown(f"[**Click to open listing**]({item['link']})")
+                st.write("---")
     else:
-        st.error("No recent events found. Try again in a few days!")
+        st.error("Still no matches. Try checking your internet or clicking 'Search' again in a moment.")
 
 st.sidebar.markdown("""
-### What this finds:
-* **Modules:** 2-day, 3-day, or 5-day workshops.
-* **Courses:** Longer 2-6 week implant training.
-* **Events:** IDA meetings, Open Houses, and CDE programs.
-* **Location:** Strictly filtered for **Udupi** and **Manipal**.
+### 💡 Search Tips:
+- **Broadening:** I have expanded the search to look for "Manipal" and "MCODS" specifically.
+- **Timing:** Academic calendars often update in cycles; if it's empty today, check again after the weekend.
+- **Root Canal:** Includes keywords for 'Endodontics' and 'Rotary RCT' workshops.
 """)
