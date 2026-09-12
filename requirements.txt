@@ -1,2 +1,2 @@
-streamlit
-duckduckgo-search
+streamlit>=1.40,<2
+ddgs>=9,<10
