@@ -1,95 +1,75 @@
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote
+
 import streamlit as st
-from duckduckgo_search import DDGS
-import urllib.parse
-import time
+from search_service import SearchService
 
 st.set_page_config(page_title="Udupi Dental Tracker", page_icon="🦷", layout="wide")
 
+
+@st.cache_resource
+def service():
+    folder = Path(os.environ.get("DENTAL_DATA_DIR", str(Path(__file__).parent / "data")))
+    return SearchService(folder / "listings.json")
+
+
+def timestamp(value):
+    return datetime.fromtimestamp(value, timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+
+
 st.title("🦷 Udupi & Manipal Dental Course Tracker")
-st.markdown("Search for Endodontics, Implants, and Workshops. Results are saved for 1 hour to prevent blocking.")
+st.write("Find dental courses, conferences and workshops. Successful listings are saved for later visits.")
+st.caption("These are search leads, including possible past events. Confirm dates, location and registration with the organiser.")
+engine = service()
+left, right = st.columns(2)
+normal = left.button("🔍 Search / Show saved listings", use_container_width=True)
+force = right.button("Check for new listings", use_container_width=True)
+st.caption("Saved searches are reused for one hour. Checking for new listings is limited to once every 10 minutes across this server.")
 
-# --- CACHING LOGIC ---
-# This saves the results so you don't get blocked for searching too often
-@st.cache_data(ttl=3600) 
-def get_cached_results(dummy_trigger):
-    queries = [
-        "dental workshop Manipal 2024 2026",
-        "dental conclave Udupi",
-        "endodontics module Manipal MCODS",
-        "root canal hands-on Udupi",
-        "dental implant course Udupi Karnataka",
-        "MCODS Manipal CDE news"
-    ]
-    
-    found_results = []
-    
-    with DDGS() as ddgs:
-        for q in queries:
-            try:
-                # Small sleep to prevent rate-limiting/blocking
-                time.sleep(0.5) 
-                results = ddgs.text(q, region='in-en', max_results=8)
-                if results:
-                    for r in results:
-                        content = (r['title'] + r['body']).lower()
-                        local_keywords = ["manipal", "udupi", "mcods", "karnataka", "nitte", "mahe"]
-                        if any(k in content for k in local_keywords):
-                            if r['href'] not in [res['link'] for res in found_results]:
-                                found_results.append({
-                                    "title": r['title'],
-                                    "link": r['href'],
-                                    "desc": r['body']
-                                })
-            except Exception:
-                continue # Skip if a specific query is blocked
-    return found_results
+# Keep status separate from the saved-listings display.
+status = st.empty()
+listing_area = st.empty()
 
-# --- UI LOGIC ---
-if st.button('🔍 Search / Refresh Listings'):
-    # We use time.time() to allow manual refresh if the user really wants to
-    results = get_cached_results(time.time())
-    st.session_state['dental_results'] = results
 
-if 'dental_results' in st.session_state and st.session_state['dental_results']:
-    results = st.session_state['dental_results']
-    st.success(f"Found {len(results)} listings!")
+def render():
+    snapshot = engine.snapshot()
+    results = snapshot["results"]
+    with listing_area.container():
+        if not results:
+            st.info("No saved listings yet. Run a search. If the provider is unavailable, use the direct search links below.")
+            return
+        st.success(f"{len(results)} saved listings")
+        st.caption("Last search that found matches: " + timestamp(snapshot["last_success"]))
+        if snapshot["issues"]:
+            st.warning("The last refresh was incomplete. Saved listings are still shown.")
+        text = "🦷 Udupi & Manipal dental listings — verify event dates\n\n" + "\n\n".join(
+            f"{r['title']}\n{r['link']}" for r in results[:5])
+        a, b = st.columns(2)
+        a.link_button("Share top 5 via WhatsApp", "https://wa.me/?text=" + quote(text))
+        b.link_button("Share top 5 via email", "mailto:?subject=" + quote("Dental courses Udupi") + "&body=" + quote(text))
+        st.download_button("Download all listings", "\n\n".join(
+            f"{r['title']}\n{r['link']}\nLast found: {timestamp(r['last_seen'])}\n{r['desc']}" for r in results),
+            file_name="dental-listings.txt", mime="text/plain")
+        for item in results:
+            st.subheader(item["title"])
+            st.write(item["desc"])
+            st.caption("Last found in search: " + timestamp(item["last_seen"]))
+            st.link_button("Open listing", item["link"])
+            st.divider()
 
-    # --- EXPORT SECTION ---
-    st.subheader("📤 Share / Export Results")
-    
-    # Prepare text for sharing
-    share_text = "🦷 *Udupi Dental Events Found:*\n\n"
-    for item in results[:5]: # Top 5 results to keep message short
-        share_text += f"📍 {item['title']}\n🔗 {item['link']}\n\n"
-    
-    encoded_text = urllib.parse.quote(share_text)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        # WhatsApp Link
-        wa_url = f"https://wa.me/?text={encoded_text}"
-        st.markdown(f'''<a href="{wa_url}" target="_blank">
-            <button style="width:100%; border-radius:10px; background-color:#25D366; color:white; padding:10px; border:none; cursor:pointer;">
-                Share via WhatsApp
-            </button></a>''', unsafe_allow_html=True)
-            
-    with col2:
-        # Email Link
-        mail_url = f"mailto:?subject=Dental Courses Udupi&body={encoded_text}"
-        st.markdown(f'''<a href="{mail_url}">
-            <button style="width:100%; border-radius:10px; background-color:#0078D4; color:white; padding:10px; border:none; cursor:pointer;">
-                Share via Email
-            </button></a>''', unsafe_allow_html=True)
 
-    st.divider()
+if normal or force:
+    with st.spinner("Checking search sources. This can take about a minute or longer if providers are slow."):
+        message = engine.refresh(force=force)
+    status.info(message)
+render()
 
-    # --- DISPLAY LISTINGS ---
-    for item in results:
-        with st.container():
-            st.markdown(f"### {item['title']}")
-            st.write(item['desc'])
-            st.markdown(f"[**Open Link**]({item['link']})")
-            st.write("---")
-            
-elif 'dental_results' in st.session_state:
-    st.warning("No results found. The search engine might be blocking requests. Please try again in 10 minutes.")
+with st.expander("Direct searches and search status"):
+    st.write("These open your browser; they are not verified event listings.")
+    for label, query in [("Dental events in Udupi / Manipal", "dental workshop conference Udupi Manipal"),
+                         ("MCODS official website search", "site:manipal.edu mcods manipal CDE workshop")]:
+        st.link_button(label, "https://www.google.com/search?q=" + quote(query))
+    for issue in engine.snapshot()["issues"]:
+        st.text(issue)
